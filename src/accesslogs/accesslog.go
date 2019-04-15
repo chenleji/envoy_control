@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	alf "github.com/envoyproxy/go-control-plane/envoy/config/filter/accesslog/v2"
 	als "github.com/envoyproxy/go-control-plane/envoy/service/accesslog/v2"
 
 	slog "github.com/sirupsen/logrus"
@@ -63,15 +62,15 @@ func (svc *AccessLogService) StreamAccessLogs(stream als.AccessLogService_Stream
 					common := entry.CommonProperties
 					req := entry.Request
 					resp := entry.Response
-					if common == nil {
-						common = &alf.AccessLogCommon{}
-					}
-					if req == nil {
-						req = &alf.HTTPRequestProperties{}
-					}
-					if resp == nil {
-						resp = &alf.HTTPResponseProperties{}
-					}
+					//if common == nil {
+					//	common = &alf.AccessLogCommon{}
+					//}
+					//if req == nil {
+					//	req = &alf.HTTPRequestProperties{}
+					//}
+					//if resp == nil {
+					//	resp = &alf.HTTPResponseProperties{}
+					//}
 					svc.log(fmt.Sprintf("[%s%s] %s %s %s %d %s %s",
 						logName, time.Now().Format(time.RFC3339), req.Authority, req.Path, req.Scheme,
 						resp.ResponseCode.GetValue(), req.RequestId, common.UpstreamCluster))
@@ -81,9 +80,9 @@ func (svc *AccessLogService) StreamAccessLogs(stream als.AccessLogService_Stream
 			for _, entry := range entries.TcpLogs.LogEntry {
 				if entry != nil {
 					common := entry.CommonProperties
-					if common == nil {
-						common = &alf.AccessLogCommon{}
-					}
+					//if common == nil {
+					//	common = &alf.AccessLogCommon{}
+					//}
 					svc.log(fmt.Sprintf("[%s%s] tcp %s %s",
 						logName, time.Now().Format(time.RFC3339), common.UpstreamLocalAddress, common.UpstreamCluster))
 				}

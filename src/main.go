@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	myals "accesslogs"
+	myals "github.com/salrashid123/envoy_control/src/accesslogs"
 
 	"github.com/envoyproxy/go-control-plane/pkg/cache"
 	xds "github.com/envoyproxy/go-control-plane/pkg/server"
@@ -37,7 +37,7 @@ var (
 	debug       bool
 	onlyLogging bool
 
-	localhost = "127.0.0.1"
+	localhost = "0.0.0.0"
 
 	port        uint
 	gatewayPort uint
@@ -79,13 +79,14 @@ func (cb *callbacks) Report() {
 	defer cb.mu.Unlock()
 	log.WithFields(log.Fields{"fetches": cb.fetches, "requests": cb.requests}).Info("cb.Report()  callbacks")
 }
-func (cb *callbacks) OnStreamOpen(id int64, typ string) {
+func (cb *callbacks) OnStreamOpen(ctx context.Context, id int64, typ string) error {
 	log.Infof("OnStreamOpen %d open for %s", id, typ)
+	return nil
 }
 func (cb *callbacks) OnStreamClosed(id int64) {
 	log.Infof("OnStreamClosed %d closed", id)
 }
-func (cb *callbacks) OnStreamRequest(int64, *v2.DiscoveryRequest) {
+func (cb *callbacks) OnStreamRequest(int64, *v2.DiscoveryRequest) error {
 	log.Infof("OnStreamRequest")
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
@@ -94,12 +95,13 @@ func (cb *callbacks) OnStreamRequest(int64, *v2.DiscoveryRequest) {
 		close(cb.signal)
 		cb.signal = nil
 	}
+	return nil
 }
 func (cb *callbacks) OnStreamResponse(int64, *v2.DiscoveryRequest, *v2.DiscoveryResponse) {
 	log.Infof("OnStreamResponse...")
 	cb.Report()
 }
-func (cb *callbacks) OnFetchRequest(req *v2.DiscoveryRequest) {
+func (cb *callbacks) OnFetchRequest(ctx context.Context, req *v2.DiscoveryRequest) error {
 	log.Infof("OnFetchRequest...")
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
@@ -108,6 +110,7 @@ func (cb *callbacks) OnFetchRequest(req *v2.DiscoveryRequest) {
 		close(cb.signal)
 		cb.signal = nil
 	}
+	return nil
 }
 func (cb *callbacks) OnFetchResponse(*v2.DiscoveryRequest, *v2.DiscoveryResponse) {}
 
@@ -215,7 +218,6 @@ func main() {
 
 	srv := xds.NewServer(config, cb)
 
-	//als := &accesslogs.AccessLogService{}
 	als := &myals.AccessLogService{}
 	go RunAccessLogServer(ctx, als, alsPort)
 
@@ -236,16 +238,16 @@ func main() {
 
 	for {
 		atomic.AddInt32(&version, 1)
-		nodeId := config.GetStatusKeys()[1]
+		nodeId := config.GetStatusKeys()[0]
 
-		var clusterName = "service_bbc"
-		var remoteHost = "www.bbc.com"
-		var sni = "www.bbc.com"
+		var clusterName = "service_baidu"
+		var remoteHost = "www.baidu.com"
+		var sni = "www.baidu.com"
 		log.Infof(">>>>>>>>>>>>>>>>>>> creating cluster " + clusterName)
 
 		//c := []cache.Resource{resource.MakeCluster(resource.Ads, clusterName)}
 
-		h := &core.Address{Address: &core.Address_SocketAddress{
+		host := &core.Address{Address: &core.Address_SocketAddress{
 			SocketAddress: &core.SocketAddress{
 				Address:  remoteHost,
 				Protocol: core.TCP,
@@ -257,12 +259,14 @@ func main() {
 
 		c := []cache.Resource{
 			&v2.Cluster{
-				Name:            clusterName,
-				ConnectTimeout:  2 * time.Second,
-				Type:            v2.Cluster_LOGICAL_DNS,
+				Name:           clusterName,
+				ConnectTimeout: 2 * time.Second,
+				ClusterDiscoveryType: &v2.Cluster_Type{
+					Type: v2.Cluster_LOGICAL_DNS,
+				},
 				DnsLookupFamily: v2.Cluster_V4_ONLY,
 				LbPolicy:        v2.Cluster_ROUND_ROBIN,
-				Hosts:           []*core.Address{h},
+				Hosts:           []*core.Address{host},
 				TlsContext: &auth.UpstreamTlsContext{
 					Sni: sni,
 				},
@@ -271,9 +275,9 @@ func main() {
 
 		// =================================================================================
 		var listenerName = "listener_0"
-		var targetHost = "www.bbc.com"
+		var targetHost = "www.baidu.com"
 		var targetRegex = "/*"
-		var virtualHostName = "local_service"
+		var virtualHostName = "backend"
 		var routeConfigName = "local_route"
 
 		log.Infof(">>>>>>>>>>>>>>>>>>> creating listener " + listenerName)
@@ -335,10 +339,12 @@ func main() {
 				},
 				FilterChains: []listener.FilterChain{{
 					Filters: []listener.Filter{{
-						Name:   util.HTTPConnectionManager,
-						Config: pbst,
+						Name: util.HTTPConnectionManager,
+						ConfigType: &listener.Filter_Config{
+							Config: pbst,
+						},
 					}},
-				}},
+			 	}},
 			}}
 
 		// =================================================================================
