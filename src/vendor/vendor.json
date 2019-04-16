@@ -3,6 +3,12 @@
 	"ignore": "test",
 	"package": [
 		{
+			"checksumSHA1": "OksAzF6VvpfTlte99lpVNV+iSnY=",
+			"path": "github.com/astaxie/beego/logs",
+			"revision": "053a075344c118a5cc41981b29ef612bb53d20ca",
+			"revisionTime": "2018-07-31T13:18:48Z"
+		},
+		{
 			"checksumSHA1": "zHKywCuGlHetzRS8KS2Gt1zHOvw=",
 			"path": "github.com/envoyproxy/go-control-plane/envoy/api/v2",
 			"revision": "2026bb63b9164b8a7898931e2fbdf7526224d480",
@@ -41,6 +47,12 @@
 		{
 			"checksumSHA1": "HUYh0UUyWflvRbAPqvBQp2tOYiE=",
 			"path": "github.com/envoyproxy/go-control-plane/envoy/api/v2/route",
+			"revision": "2026bb63b9164b8a7898931e2fbdf7526224d480",
+			"revisionTime": "2019-04-08T18:38:37Z"
+		},
+		{
+			"checksumSHA1": "AslvZUHgIjKsJS1blggGOcDRZ8E=",
+			"path": "github.com/envoyproxy/go-control-plane/envoy/config/accesslog/v2",
 			"revision": "2026bb63b9164b8a7898931e2fbdf7526224d480",
 			"revisionTime": "2019-04-08T18:38:37Z"
 		},

@@ -32,6 +32,13 @@ static_resources:
     connect_timeout: 1s
     hosts:
     - socket_address:
-        address: 192.168.8.114
+        address: 10.67.52.249
         port_value: 18000
     http2_protocol_options: {}    
+  - name: accesslog_cluster
+    connect_timeout: 2s
+    hosts:
+      - socket_address:
+          address: 10.67.52.249
+          port_value: 18090
+    http2_protocol_options: {}

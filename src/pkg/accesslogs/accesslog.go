@@ -2,22 +2,12 @@ package accesslogs
 
 import (
 	"fmt"
+	"github.com/astaxie/beego/logs"
 	"sync"
 	"time"
 
 	als "github.com/envoyproxy/go-control-plane/envoy/service/accesslog/v2"
-
-	slog "github.com/sirupsen/logrus"
 )
-
-type logger struct{}
-
-func (logger logger) Infof(format string, args ...interface{}) {
-	slog.Infof(format, args...)
-}
-func (logger logger) Errorf(format string, args ...interface{}) {
-	slog.Errorf(format, args...)
-}
 
 // AccessLogService buffers access logs from the remote Envoy nodes.
 type AccessLogService struct {
@@ -29,8 +19,7 @@ func (svc *AccessLogService) log(entry string) {
 	svc.mu.Lock()
 	defer svc.mu.Unlock()
 	svc.entries = append(svc.entries, entry)
-
-	slog.Infof("AccessLog:  " + entry)
+	logs.Info("AccessLog:  " + entry)
 
 }
 

@@ -5,220 +5,73 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"net"
-	"net/http"
-	"os"
-
-	"sync"
-	"sync/atomic"
-	"time"
-
-	myals "github.com/salrashid123/envoy_control/src/accesslogs"
-
-	"github.com/envoyproxy/go-control-plane/pkg/cache"
-	xds "github.com/envoyproxy/go-control-plane/pkg/server"
-
-	log "github.com/sirupsen/logrus"
-	"google.golang.org/grpc"
-
+	"github.com/astaxie/beego/logs"
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2"
-	"github.com/envoyproxy/go-control-plane/envoy/api/v2/auth"
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2/listener"
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2/route"
-	accesslog "github.com/envoyproxy/go-control-plane/envoy/service/accesslog/v2"
-	discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v2"
-
+	alsV22 "github.com/envoyproxy/go-control-plane/envoy/config/accesslog/v2"
+	alsFilterV21 "github.com/envoyproxy/go-control-plane/envoy/config/filter/accesslog/v2"
 	hcm "github.com/envoyproxy/go-control-plane/envoy/config/filter/network/http_connection_manager/v2"
+	alsV2 "github.com/envoyproxy/go-control-plane/envoy/service/accesslog/v2"
+	discovery "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v2"
+	"github.com/envoyproxy/go-control-plane/pkg/cache"
+	xds "github.com/envoyproxy/go-control-plane/pkg/server"
 	"github.com/envoyproxy/go-control-plane/pkg/util"
+	aLogs "github.com/salrashid123/envoy_control/src/pkg/accesslogs"
+	"github.com/salrashid123/envoy_control/src/pkg/callback"
+	"github.com/salrashid123/envoy_control/src/pkg/logger"
+	"github.com/salrashid123/envoy_control/src/pkg/nodehash"
+	"google.golang.org/grpc"
+	"net"
+	"os"
+	"sync/atomic"
+	"time"
 )
 
 var (
 	debug       bool
 	onlyLogging bool
-
-	localhost = "0.0.0.0"
-
+	localhost   = "0.0.0.0"
 	port        uint
-	gatewayPort uint
 	alsPort     uint
-
-	mode string
-
-	version int32
-
-	config cache.SnapshotCache
+	mode        string
+	version     int32
+	config      cache.SnapshotCache
 )
 
 const (
-	XdsCluster = "xds_cluster"
-	Ads        = "ads"
-	Xds        = "xds"
-	Rest       = "rest"
+	XdsCluster               = "xds_cluster"
+	Ads                      = "ads"
+	Xds                      = "xds"
+	Rest                     = "rest"
+	gRpcMaxConcurrentStreams = 1000000
 )
 
 func init() {
 	flag.BoolVar(&debug, "debug", true, "Use debug logging")
 	flag.BoolVar(&onlyLogging, "onlyLogging", false, "Only demo AccessLogging Service")
 	flag.UintVar(&port, "port", 18000, "Management server port")
-	flag.UintVar(&gatewayPort, "gateway", 18001, "Management server port for HTTP gateway")
-	flag.UintVar(&alsPort, "als", 18090, "Accesslog server port")
+	flag.UintVar(&alsPort, "als", 18090, "Access log server port")
 	flag.StringVar(&mode, "ads", Ads, "Management server type (ads, xds, rest)")
-}
-
-type logger struct{}
-
-func (logger logger) Infof(format string, args ...interface{}) {
-	log.Infof(format, args...)
-}
-func (logger logger) Errorf(format string, args ...interface{}) {
-	log.Errorf(format, args...)
-}
-func (cb *callbacks) Report() {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	log.WithFields(log.Fields{"fetches": cb.fetches, "requests": cb.requests}).Info("cb.Report()  callbacks")
-}
-func (cb *callbacks) OnStreamOpen(ctx context.Context, id int64, typ string) error {
-	log.Infof("OnStreamOpen %d open for %s", id, typ)
-	return nil
-}
-func (cb *callbacks) OnStreamClosed(id int64) {
-	log.Infof("OnStreamClosed %d closed", id)
-}
-func (cb *callbacks) OnStreamRequest(int64, *v2.DiscoveryRequest) error {
-	log.Infof("OnStreamRequest")
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	cb.requests++
-	if cb.signal != nil {
-		close(cb.signal)
-		cb.signal = nil
-	}
-	return nil
-}
-func (cb *callbacks) OnStreamResponse(int64, *v2.DiscoveryRequest, *v2.DiscoveryResponse) {
-	log.Infof("OnStreamResponse...")
-	cb.Report()
-}
-func (cb *callbacks) OnFetchRequest(ctx context.Context, req *v2.DiscoveryRequest) error {
-	log.Infof("OnFetchRequest...")
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	cb.fetches++
-	if cb.signal != nil {
-		close(cb.signal)
-		cb.signal = nil
-	}
-	return nil
-}
-func (cb *callbacks) OnFetchResponse(*v2.DiscoveryRequest, *v2.DiscoveryResponse) {}
-
-type callbacks struct {
-	signal   chan struct{}
-	fetches  int
-	requests int
-	mu       sync.Mutex
-}
-
-// Hasher returns node ID as an ID
-type Hasher struct {
-}
-
-// ID function
-func (h Hasher) ID(node *core.Node) string {
-	if node == nil {
-		return "unknown"
-	}
-	return node.Id
-}
-
-// RunAccessLogServer starts an accesslog service.
-func RunAccessLogServer(ctx context.Context, als *myals.AccessLogService, port uint) {
-	grpcServer := grpc.NewServer()
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		log.WithError(err).Fatal("failed to listen")
-	}
-
-	accesslog.RegisterAccessLogServiceServer(grpcServer, als)
-	log.WithFields(log.Fields{"port": port}).Info("access log server listening")
-
-	go func() {
-		if err = grpcServer.Serve(lis); err != nil {
-			log.Error(err)
-		}
-	}()
-	<-ctx.Done()
-
-	grpcServer.GracefulStop()
-}
-
-const grpcMaxConcurrentStreams = 1000000
-
-// RunManagementServer starts an xDS server at the given port.
-func RunManagementServer(ctx context.Context, server xds.Server, port uint) {
-	var grpcOptions []grpc.ServerOption
-	grpcOptions = append(grpcOptions, grpc.MaxConcurrentStreams(grpcMaxConcurrentStreams))
-	grpcServer := grpc.NewServer(grpcOptions...)
-
-	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		log.WithError(err).Fatal("failed to listen")
-	}
-
-	// register services
-	discovery.RegisterAggregatedDiscoveryServiceServer(grpcServer, server)
-	v2.RegisterEndpointDiscoveryServiceServer(grpcServer, server)
-	v2.RegisterClusterDiscoveryServiceServer(grpcServer, server)
-	v2.RegisterRouteDiscoveryServiceServer(grpcServer, server)
-	v2.RegisterListenerDiscoveryServiceServer(grpcServer, server)
-
-	log.WithFields(log.Fields{"port": port}).Info("management server listening")
-	go func() {
-		if err = grpcServer.Serve(lis); err != nil {
-			log.Error(err)
-		}
-	}()
-	<-ctx.Done()
-
-	grpcServer.GracefulStop()
-}
-
-// RunManagementGateway starts an HTTP gateway to an xDS server.
-func RunManagementGateway(ctx context.Context, srv xds.Server, port uint) {
-	log.WithFields(log.Fields{"port": port}).Info("gateway listening HTTP/1.1")
-	server := &http.Server{Addr: fmt.Sprintf(":%d", port), Handler: &xds.HTTPGateway{Server: srv}}
-	go func() {
-		if err := server.ListenAndServe(); err != nil {
-			log.Error(err)
-		}
-	}()
-	if err := server.Shutdown(ctx); err != nil {
-		log.Error(err)
-	}
 }
 
 func main() {
 	flag.Parse()
 	if debug {
-		log.SetLevel(log.DebugLevel)
+		logs.SetLevel(logs.LevelDebug)
 	}
-	ctx := context.Background()
 
-	log.Printf("Starting control plane")
+	logs.Debug("Starting control plane")
 
 	signal := make(chan struct{})
-	cb := &callbacks{
-		signal:   signal,
-		fetches:  0,
-		requests: 0,
-	}
-	config = cache.NewSnapshotCache(mode == Ads, Hasher{}, logger{})
+	cb := callback.NewCallbacks(signal)
+	config = cache.NewSnapshotCache(mode == Ads, nodehash.NodeHash{}, logger.Logger{})
 
 	srv := xds.NewServer(config, cb)
+	als := &aLogs.AccessLogService{}
 
-	als := &myals.AccessLogService{}
+	ctx := context.Background()
 	go RunAccessLogServer(ctx, als, alsPort)
 
 	if onlyLogging {
@@ -229,30 +82,28 @@ func main() {
 
 	// start the xDS server
 	go RunManagementServer(ctx, srv, port)
-	go RunManagementGateway(ctx, srv, gatewayPort)
 
 	<-signal
 
-	als.Dump(func(s string) { log.Debug(s) })
+	als.Dump(func(s string) { logs.Info(s) })
 	cb.Report()
 
 	for {
 		atomic.AddInt32(&version, 1)
 		nodeId := config.GetStatusKeys()[0]
 
-		var clusterName = "service_baidu"
-		var remoteHost = "www.baidu.com"
-		var sni = "www.baidu.com"
-		log.Infof(">>>>>>>>>>>>>>>>>>> creating cluster " + clusterName)
+		// cluster + hosts
 
-		//c := []cache.Resource{resource.MakeCluster(resource.Ads, clusterName)}
+		var clusterName = "mock_server"
+		var remoteHost = "10.67.52.249"
+		logs.Debug(">>>>>>>>>>>>>>>>>>> creating cluster " + clusterName)
 
 		host := &core.Address{Address: &core.Address_SocketAddress{
 			SocketAddress: &core.SocketAddress{
-				Address:  remoteHost,
-				Protocol: core.TCP,
+				Address: remoteHost,
+				//Protocol: core.TCP,
 				PortSpecifier: &core.SocketAddress_PortValue{
-					PortValue: uint32(443),
+					PortValue: uint32(18010),
 				},
 			},
 		}}
@@ -261,26 +112,18 @@ func main() {
 			&v2.Cluster{
 				Name:           clusterName,
 				ConnectTimeout: 2 * time.Second,
-				ClusterDiscoveryType: &v2.Cluster_Type{
-					Type: v2.Cluster_LOGICAL_DNS,
-				},
-				DnsLookupFamily: v2.Cluster_V4_ONLY,
-				LbPolicy:        v2.Cluster_ROUND_ROBIN,
-				Hosts:           []*core.Address{host},
-				TlsContext: &auth.UpstreamTlsContext{
-					Sni: sni,
-				},
+				Hosts:          []*core.Address{host},
 			},
 		}
 
-		// =================================================================================
+		// listener
+
 		var listenerName = "listener_0"
-		var targetHost = "www.baidu.com"
-		var targetRegex = "/*"
+		var targetRegex = "/"
 		var virtualHostName = "backend"
 		var routeConfigName = "local_route"
 
-		log.Infof(">>>>>>>>>>>>>>>>>>> creating listener " + listenerName)
+		logs.Debug(">>>>>>>>>>>>>>>>>>> creating listener " + listenerName)
 
 		v := route.VirtualHost{
 			Name:    virtualHostName,
@@ -288,22 +131,36 @@ func main() {
 
 			Routes: []route.Route{{
 				Match: route.RouteMatch{
-					PathSpecifier: &route.RouteMatch_Regex{
-						Regex: targetRegex,
+					PathSpecifier: &route.RouteMatch_Prefix{
+						Prefix: targetRegex,
 					},
 				},
 				Action: &route.Route_Route{
 					Route: &route.RouteAction{
-						HostRewriteSpecifier: &route.RouteAction_HostRewrite{
-							HostRewrite: targetHost,
-						},
 						ClusterSpecifier: &route.RouteAction_Cluster{
 							Cluster: clusterName,
 						},
-						PrefixRewrite: "/robots.txt",
 					},
 				},
 			}}}
+
+		accessConf := &alsV22.HttpGrpcAccessLogConfig{
+			CommonConfig: &alsV22.CommonGrpcAccessLogConfig{
+				LogName: "accesslog",
+				GrpcService: &core.GrpcService{
+					TargetSpecifier: &core.GrpcService_EnvoyGrpc_{
+						EnvoyGrpc: &core.GrpcService_EnvoyGrpc{
+							ClusterName: "accesslog_cluster",
+						},
+					},
+				},
+			},
+		}
+
+		accessConfig, err := util.MessageToStruct(accessConf)
+		if err != nil {
+			panic(err)
+		}
 
 		manager := &hcm.HttpConnectionManager{
 			CodecType:  hcm.AUTO,
@@ -317,8 +174,16 @@ func main() {
 			HttpFilters: []*hcm.HttpFilter{{
 				Name: util.Router,
 			}},
+			AccessLog: []*alsFilterV21.AccessLog{{
+				Name: util.HTTPGRPCAccessLog,
+				ConfigType: &alsFilterV21.AccessLog_Config{
+					Config: accessConfig,
+				},
+			},
+			},
 		}
-		pbst, err := util.MessageToStruct(manager)
+
+		filterConfig, err := util.MessageToStruct(manager)
 		if err != nil {
 			panic(err)
 		}
@@ -341,22 +206,72 @@ func main() {
 					Filters: []listener.Filter{{
 						Name: util.HTTPConnectionManager,
 						ConfigType: &listener.Filter_Config{
-							Config: pbst,
+							Config: filterConfig,
 						},
 					}},
-			 	}},
+				}},
 			}}
 
-		// =================================================================================
-
-		log.Infof(">>>>>>>>>>>>>>>>>>> creating snapshot Version " + fmt.Sprint(version))
+		logs.Debug(">>>>>>>>>>>>>>>>>>> creating snapshot Version " + fmt.Sprint(version))
 		snap := cache.NewSnapshot(fmt.Sprint(version), nil, c, nil, l)
 
-		config.SetSnapshot(nodeId, snap)
+		if err := config.SetSnapshot(nodeId, snap); err != nil {
+			logs.Error("set snapshot err:", err)
+		}
 
 		reader := bufio.NewReader(os.Stdin)
 		_, _ = reader.ReadString('\n')
 
 	}
+}
 
+func RunManagementServer(ctx context.Context, server xds.Server, port uint) {
+	var gRpcOptions []grpc.ServerOption
+	gRpcOptions = append(gRpcOptions, grpc.MaxConcurrentStreams(gRpcMaxConcurrentStreams))
+	gRpcServer := grpc.NewServer(gRpcOptions...)
+
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		logs.Error("failed to listen")
+		return
+	}
+
+	// register services
+	discovery.RegisterAggregatedDiscoveryServiceServer(gRpcServer, server)
+	v2.RegisterEndpointDiscoveryServiceServer(gRpcServer, server)
+	v2.RegisterClusterDiscoveryServiceServer(gRpcServer, server)
+	v2.RegisterRouteDiscoveryServiceServer(gRpcServer, server)
+	v2.RegisterListenerDiscoveryServiceServer(gRpcServer, server)
+
+	logs.Debug("management server listening")
+	go func() {
+		if err = gRpcServer.Serve(lis); err != nil {
+			logs.Error(err)
+		}
+	}()
+	<-ctx.Done()
+
+	gRpcServer.GracefulStop()
+}
+
+func RunAccessLogServer(ctx context.Context, als *aLogs.AccessLogService, port uint) {
+	gRpcServer := grpc.NewServer()
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		logs.Error("failed to listen")
+		return
+	}
+
+	alsV2.RegisterAccessLogServiceServer(gRpcServer, als)
+	logs.Debug("access log server listening")
+
+	go func() {
+		if err = gRpcServer.Serve(lis); err != nil {
+			logs.Error(err)
+			return
+		}
+	}()
+	<-ctx.Done()
+
+	gRpcServer.GracefulStop()
 }

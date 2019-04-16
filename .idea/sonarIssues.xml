@@ -53,6 +53,26 @@
             <set />
           </value>
         </entry>
+        <entry key="$PROJECT_DIR$/src/pkg/accesslogs/accesslog.go">
+          <value>
+            <set />
+          </value>
+        </entry>
+        <entry key="$PROJECT_DIR$/src/pkg/callback/callback.go">
+          <value>
+            <set />
+          </value>
+        </entry>
+        <entry key="$PROJECT_DIR$/src/pkg/logger/logger.go">
+          <value>
+            <set />
+          </value>
+        </entry>
+        <entry key="$PROJECT_DIR$/src/pkg/nodehash/nodehash.go">
+          <value>
+            <set />
+          </value>
+        </entry>
       </map>
     </option>
   </component>
