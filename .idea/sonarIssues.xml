@@ -38,12 +38,37 @@
             <set />
           </value>
         </entry>
+        <entry key="$PROJECT_DIR$/Dockerfile">
+          <value>
+            <set />
+          </value>
+        </entry>
+        <entry key="$PROJECT_DIR$/Makefile">
+          <value>
+            <set />
+          </value>
+        </entry>
+        <entry key="$PROJECT_DIR$/Readme.md">
+          <value>
+            <set />
+          </value>
+        </entry>
         <entry key="$PROJECT_DIR$/baseline.yaml">
           <value>
             <set />
           </value>
         </entry>
+        <entry key="$PROJECT_DIR$/logs.yaml">
+          <value>
+            <set />
+          </value>
+        </entry>
         <entry key="$PROJECT_DIR$/src/accesslogs/accesslog.go">
+          <value>
+            <set />
+          </value>
+        </entry>
+        <entry key="$PROJECT_DIR$/src/envoy.sh">
           <value>
             <set />
           </value>
